@@ -1,7 +1,12 @@
 package com.example.simpleboggle
 
 import android.annotation.SuppressLint
+import android.content.Context
 import android.graphics.Color
+import android.hardware.Sensor
+import android.hardware.SensorEvent
+import android.hardware.SensorEventListener
+import android.hardware.SensorManager
 import androidx.appcompat.app.AppCompatActivity
 import android.os.Bundle
 import android.util.Log
@@ -15,19 +20,22 @@ import android.widget.Toast
 import java.io.IOException
 import java.util.Locale
 
-data class GridItem(val letter: String, var isSelected: Boolean = false, val position: Int)
+data class GridItem(val letter: String, var isSelected: Boolean = false, var isDisabled: Boolean = false, val position: Int)
 
 class MainActivity : AppCompatActivity() {
     private var currentScore = 0
     private lateinit var validWords: Set<String>
     private lateinit var gridLayout: GridLayout
     private val usedWords = mutableSetOf<String>()
-
-
     private val currentWord = StringBuilder()
+    private val currentRoundSelectedPositions = mutableSetOf<Int>()
+    private val gameDisabledPositions = mutableSetOf<Int>()
+
+    private lateinit var sensorManager: SensorManager
+    private var accelerometer: Sensor? = null
+    private var shakeDetector: ShakeDetector? = null
 
     var selectedWord = ""
-
 
     private val gridItems = mutableListOf<GridItem>()
     private val selectedPositions = mutableSetOf<Int>()
@@ -37,6 +45,7 @@ class MainActivity : AppCompatActivity() {
         setContentView(R.layout.activity_main)
 
         validWords = loadWords()
+        setupShakeDetector()
         setupGrid()
         setupButtons()
 
@@ -56,10 +65,11 @@ class MainActivity : AppCompatActivity() {
                     val position = row * gridLayout.columnCount + column
 
 
-                    if (position in gridItems.indices && !selectedPositions.contains(position)) {
+                    if (position in gridItems.indices && !selectedPositions.contains(position) && !currentRoundSelectedPositions.contains(position)) {
                         val gridItem = gridItems[position]
+                        currentRoundSelectedPositions.add(position)
                         selectedPositions.add(position)
-                        updateGridItemSelection(gridItem, true)
+                        updateGridItemSelection(gridItem, isSelected = true, gridItem.isDisabled)
 
                         currentWord.append(gridItem.letter)
 
@@ -69,7 +79,7 @@ class MainActivity : AppCompatActivity() {
                 }
                 MotionEvent.ACTION_UP -> {
                     gridItems.forEach { it.isSelected = false }
-                    gridItems.forEach { updateGridItemSelection(it, false) }
+                    gridItems.forEach { updateGridItemSelection(it, false, it.isDisabled) }
                     true
                 }
                 else -> false
@@ -77,13 +87,15 @@ class MainActivity : AppCompatActivity() {
         }
     }
 
-    private fun updateGridItemSelection(gridItem: GridItem, isSelected: Boolean) {
+    private fun updateGridItemSelection(gridItem: GridItem, isSelected: Boolean, isDisabled: Boolean) {
         val textView = gridLayout.findViewWithTag<TextView>("Letter${gridItem.position}")
         textView?.let {
-            if (isSelected) {
+            if (isDisabled) {
                 it.setBackgroundColor(Color.GRAY)
                 gridItem.isSelected = true
-            } else {
+            } else if (isSelected) {
+                it.setBackgroundColor(Color.CYAN)
+            } else if (!currentRoundSelectedPositions.contains(gridItem.position)){
                 it.setBackgroundColor(Color.TRANSPARENT)
             }
         }
@@ -94,13 +106,31 @@ class MainActivity : AppCompatActivity() {
         try {
             assets.open("Dictionary.txt").bufferedReader().useLines { lines ->
                 lines.forEach { word ->
-                    words.add(word.toLowerCase().trim())
+                    if(word.length >= 4 && containsAtLeastTwoVowels(word)) {
+                        words.add(word.toLowerCase().trim())
+                    }
                 }
             }
         } catch (e: IOException) {
             e.printStackTrace()
         }
         return words
+    }
+
+    fun containsAtLeastTwoVowels(input: String): Boolean {
+        val vowels = setOf('a', 'e', 'i', 'o', 'u', 'A', 'E', 'I', 'O', 'U')
+        var vowelCount = 0
+
+        for (char in input) {
+            if (char in vowels) {
+                vowelCount++
+                if (vowelCount >= 2) {
+                    return true
+                }
+            }
+        }
+
+        return false
     }
 
     private fun setupGrid() {
@@ -111,7 +141,7 @@ class MainActivity : AppCompatActivity() {
             "G", "N", "M", "B",
             "E", "F", "H", "I")
         letters.forEachIndexed { index, letter ->
-            gridItems.add(GridItem(letter, false, index))
+            gridItems.add(GridItem(letter, false, false, index))
         }
         val gridLayout: GridLayout = findViewById(R.id.lettersGrid)
         gridLayout.removeAllViews()
@@ -144,7 +174,6 @@ class MainActivity : AppCompatActivity() {
         }
     }
 
-
     private fun setupButtons() {
         val submitButton = findViewById<Button>(R.id.submitWordButton)
         val clearButton = findViewById<Button>(R.id.clearWordButton)
@@ -155,16 +184,25 @@ class MainActivity : AppCompatActivity() {
             val currentWordTextView: TextView = findViewById(R.id.currentWordTextView)
 
             if (word.isNotEmpty() && validWords.contains(word.toLowerCase(Locale.getDefault())) && !usedWords.contains(word)) {
+                Log.d("WORD", word)
+                gameDisabledPositions.addAll(currentRoundSelectedPositions)
+                Log.d("index", gameDisabledPositions.toString())
+                gameDisabledPositions.forEach { position ->
+                    val gridItem = gridItems[position]
+                    updateGridItemSelection(gridItem, isSelected = false, isDisabled = true)
+                }
                 val score = calculateScore(word)
                 findViewById<TextView>(R.id.scoreTextView).text = "Score: $score"
                 usedWords.add(word)
                 currentScore += score
                 showToast("Correct +$score")
                 currentWordTextView.text = ""
+                currentWord.clear()
 
             } else if (usedWords.contains(word)){
                 showToast("Word used.")
                 currentWordTextView.text = ""
+                currentWord.clear()
             } else {
                 Log.d("WORD", word)
                 currentScore -= 10
@@ -217,13 +255,20 @@ class MainActivity : AppCompatActivity() {
     private fun clearCurrentWordSelection() {
         currentWord.clear()
         selectedWord = ""
+        gridItems.forEach {
+            if (!gameDisabledPositions.contains(it.position)) {
+                updateGridItemSelection(it, isSelected = false, isDisabled = false)
+            }
+        }
         selectedPositions.clear()
         findViewById<TextView>(R.id.currentWordTextView).text = ""
     }
 
     private fun resetGame() {
         gridItems.forEach { it.isSelected = false }
-        gridItems.forEach { updateGridItemSelection(it, false) }
+        currentRoundSelectedPositions.clear()
+        gameDisabledPositions.clear()
+        gridItems.forEach { updateGridItemSelection(it, false, false) }
         usedWords.clear()
         setupGrid()
         currentScore = 0
@@ -232,6 +277,53 @@ class MainActivity : AppCompatActivity() {
         findViewById<TextView>(R.id.currentWordTextView).text = ""
     }
 
+    private fun setupShakeDetector() {
+        sensorManager = getSystemService(Context.SENSOR_SERVICE) as SensorManager
+        accelerometer = sensorManager.getDefaultSensor(Sensor.TYPE_ACCELEROMETER)
+        shakeDetector = ShakeDetector {
+            resetGame()
+        }
+        accelerometer?.also { acc ->
+            sensorManager.registerListener(shakeDetector, acc, SensorManager.SENSOR_DELAY_UI)
+        }
+    }
+    inner class ShakeDetector(private val onShake: () -> Unit) : SensorEventListener {
+        private val shakeThreshold = 1.5f
+        private val timeThreshold = 500
+        private var lastUpdate: Long = 0
+        private var last_x: Float = 0.0f
+        private var last_y: Float = 0.0f
+        private var last_z: Float = 0.0f
 
+        override fun onAccuracyChanged(sensor: Sensor, accuracy: Int) {}
 
+        override fun onSensorChanged(event: SensorEvent) {
+            val currentTime = System.currentTimeMillis()
+            if ((currentTime - lastUpdate) > timeThreshold) {
+                val x = event.values[0]
+                val y = event.values[1]
+                val z = event.values[2]
+
+                Log.d("X", x.toString())
+                Log.d("Y", y.toString())
+                Log.d("Z", z.toString())
+
+                val deltaX = kotlin.math.abs(last_x - x)
+                val deltaY = kotlin.math.abs(last_y - y)
+                val deltaZ = kotlin.math.abs(last_z - z)
+
+                if ((deltaX > shakeThreshold && deltaY > shakeThreshold) ||
+                    (deltaX > shakeThreshold && deltaZ > shakeThreshold) ||
+                    (deltaY > shakeThreshold && deltaZ > shakeThreshold)) {
+                    Log.d("Shake", "Shaken")
+                    onShake()
+                }
+
+                lastUpdate = currentTime
+                last_x = x
+                last_y = y
+                last_z = z
+            }
+        }
+    }
 }
