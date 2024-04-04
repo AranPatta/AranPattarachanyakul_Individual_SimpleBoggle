@@ -95,7 +95,7 @@ class MainActivity : AppCompatActivity() {
                 gridItem.isSelected = true
             } else if (isSelected) {
                 it.setBackgroundColor(Color.CYAN)
-            } else if (!currentRoundSelectedPositions.contains(gridItem.position)){
+            } else if (!gameDisabledPositions.contains(gridItem.position)){
                 it.setBackgroundColor(Color.TRANSPARENT)
             }
         }
@@ -180,39 +180,7 @@ class MainActivity : AppCompatActivity() {
         val newGameButton = findViewById<Button>(R.id.newGameButton)
 
         submitButton.setOnClickListener {
-            val word = currentWord.toString().toLowerCase(Locale.getDefault())
-            val currentWordTextView: TextView = findViewById(R.id.currentWordTextView)
-
-            if (word.isNotEmpty() && validWords.contains(word.toLowerCase(Locale.getDefault())) && !usedWords.contains(word)) {
-                Log.d("WORD", word)
-                gameDisabledPositions.addAll(currentRoundSelectedPositions)
-                Log.d("index", gameDisabledPositions.toString())
-                gameDisabledPositions.forEach { position ->
-                    val gridItem = gridItems[position]
-                    updateGridItemSelection(gridItem, isSelected = false, isDisabled = true)
-                }
-                val score = calculateScore(word)
-                findViewById<TextView>(R.id.scoreTextView).text = "Score: $score"
-                usedWords.add(word)
-                currentScore += score
-                showToast("Correct +$score")
-                currentWordTextView.text = ""
-                currentWord.clear()
-
-            } else if (usedWords.contains(word)){
-                showToast("Word used.")
-                currentWordTextView.text = ""
-                currentWord.clear()
-            } else {
-                Log.d("WORD", word)
-                currentScore -= 10
-                showToast("Incorrect -10")
-                findViewById<TextView>(R.id.scoreTextView).text = "Score: $currentScore"
-                currentWordTextView.text = word
-            }
-            clearCurrentWordSelection()
-            currentWord.clear()
-            currentWordTextView.text = ""
+            wordSubmit()
         }
 
         clearButton.setOnClickListener {
@@ -222,6 +190,53 @@ class MainActivity : AppCompatActivity() {
         newGameButton.setOnClickListener {
             resetGame()
         }
+    }
+
+    private fun wordSubmit(){
+        val word = currentWord.toString().toLowerCase(Locale.getDefault())
+        val currentWordTextView: TextView = findViewById(R.id.currentWordTextView)
+
+        if (word.isNotEmpty() && validWords.contains(word.toLowerCase(Locale.getDefault())) && !usedWords.contains(word)) {
+            Log.d("WORD", word)
+            gameDisabledPositions.addAll(currentRoundSelectedPositions)
+            Log.d("index", gameDisabledPositions.toString())
+            gameDisabledPositions.forEach { position ->
+                val gridItem = gridItems[position]
+                updateGridItemSelection(gridItem, isSelected = false, isDisabled = true)
+            }
+            val score = calculateScore(word)
+            findViewById<TextView>(R.id.scoreTextView).text = "Score: $score"
+            usedWords.add(word)
+            currentScore += score
+            showToast("Correct +$score")
+            currentWordTextView.text = ""
+            currentWord.clear()
+            currentRoundSelectedPositions.clear()
+
+        } else if (usedWords.contains(word)){
+            showToast("Word used.")
+            currentWordTextView.text = ""
+            currentWord.clear()
+            currentRoundSelectedPositions.clear()
+            gameDisabledPositions.forEach { position ->
+                val gridItem = gridItems[position]
+                updateGridItemSelection(gridItem, isSelected = false, gridItem.isDisabled)
+            }
+        } else {
+            Log.d("WORD", word)
+            currentScore -= 10
+            showToast("Incorrect -10")
+            findViewById<TextView>(R.id.scoreTextView).text = "Score: $currentScore"
+            currentWordTextView.text = word
+            currentRoundSelectedPositions.clear()
+            gameDisabledPositions.forEach { position ->
+                val gridItem = gridItems[position]
+                updateGridItemSelection(gridItem, isSelected = false, gridItem.isDisabled)
+            }
+        }
+        clearCurrentWordSelection()
+        currentWord.clear()
+        currentWordTextView.text = ""
     }
 
     private fun calculateScore(word: String): Int {
